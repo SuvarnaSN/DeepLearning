@@ -1,0 +1,139 @@
+import torch
+import torchvision
+import torchvision.transforms as transforms  
+import numpy as npy
+from sklearn.metrics import accuracy_score
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+
+transform = transforms.Compose([transforms.ToTensor(),
+                                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]) 
+
+
+trainSet = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+testSet = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+
+
+trainDataLoader = DataLoader(trainSet, batch_size=64, shuffle=True)
+testDataLoader = DataLoader(testSet, batch_size=64, shuffle=False)
+
+
+class LinearClassifier:
+    def __init__(self, inputSize, numClasses, lambdaReg=0.0):  
+       
+        self.Weights = npy.random.randn(inputSize, numClasses) * 0.01  
+        self.Bias = npy.zeros((1, numClasses))  
+        self.lambdaReg = lambdaReg  
+    
+    def forwardFunction(self, X):
+        return npy.dot(X, self.Weights) + self.Bias 
+    
+    def LossComputation(self, scoreValues, y):
+        numOfSamples = scoreValues.shape[0]
+        exp_scores = npy.exp(scoreValues - npy.max(scoreValues, axis=1, keepdims=True)) 
+        probabilities = exp_scores / npy.sum(exp_scores, axis=1, keepdims=True)
+        correct_log_probabilities = -npy.log(probabilities[npy.arange(numOfSamples), y])
+        loss = npy.sum(correct_log_probabilities) / numOfSamples
+
+      
+        regularizationLoss = self.lambdaReg * npy.sum(self.Weights ** 2)
+        loss += regularizationLoss  
+        return loss, probabilities
+    
+    def backwardFunction(self, X, probabilities, y):
+        numOfSamples = X.shape[0]
+        dScores = probabilities
+        dScores[npy.arange(numOfSamples), y] -= 1
+        dScores /= numOfSamples
+        dWeight = npy.dot(X.T, dScores)
+
+       
+        dWeight += 2 * self.lambdaReg * self.Weights
+
+        db = npy.sum(dScores, axis=0, keepdims=True)
+        return dWeight, db
+    
+    def update_parameters(self, dWeight, db, learningRate):
+        self.Weights -= learningRate * dWeight 
+        self.Bias -= learningRate * db  
+
+
+inputSize = 32 * 32 * 3  
+numClasses = 10  
+learningRate = 0.001
+epochs = 10
+lambdaReg = 0.001  
+model = LinearClassifier(inputSize, numClasses, lambdaReg=lambdaReg)
+
+train_losses = []
+test_accuracies = []
+
+
+for epoch in range(epochs):
+    model.Weights = model.Weights.astype(npy.float32)  # Ensure that model weights are in the correct dtype (float32)
+
+    epochLoss = 0
+    for i, (XBatch, YBatch) in enumerate(trainDataLoader):
+        XBatch = XBatch.view(XBatch.size(0), -1).numpy()  # Flatten the batch of images
+        YBatch = YBatch.numpy()  # Convert labels to numpy array
+
+       
+        scoreValues = model.forwardFunction(XBatch)
+
+      
+        lossValue, probabilities = model.LossComputation(scoreValues, YBatch)
+        epochLoss += lossValue
+
+   
+        dWeight, dbias = model.backwardFunction(XBatch, probabilities, YBatch)
+
+    
+        model.update_parameters(dWeight, dbias, learningRate)
+
+    train_losses.append(epochLoss / len(trainDataLoader))  # Average loss for this epoch
+
+   
+    model.Weights = model.Weights.astype(npy.float32)  # Ensure model weights are float32 for consistency
+    testScores = []
+    testLabels = []
+
+    for XBatch, YBatch in testDataLoader:
+        XBatch = XBatch.view(XBatch.size(0), -1).numpy()  # Flatten images
+        YBatch = YBatch.numpy()  # Convert labels to numpy array
+
+      
+        scoreValues = model.forwardFunction(XBatch)
+        testScores.append(scoreValues)
+        testLabels.append(YBatch)
+    
+  
+    testScores = npy.concatenate(testScores, axis=0)
+    testLabels = npy.concatenate(testLabels, axis=0)
+
+   
+    predictedLabels = npy.argmax(testScores, axis=1)
+    accuracyScore = accuracy_score(testLabels, predictedLabels)
+    test_accuracies.append(accuracyScore)
+
+    
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {epochLoss / len(trainDataLoader):.4f}, Test Accuracy: {accuracyScore:.4f}")
+
+
+plt.figure(figsize=(12, 6))
+
+
+plt.subplot(1, 2, 1)
+plt.plot(range(epochs), train_losses, label='Training Loss', color='b')
+plt.title('Training Loss vs Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+
+
+plt.subplot(1, 2, 2)
+plt.plot(range(epochs), test_accuracies, label='Test Accuracy', color='g')
+plt.title('Test Accuracy vs Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+
+plt.tight_layout()
+plt.show()
